@@ -1,0 +1,85 @@
+import pandas as pd
+
+def process_r_groups(r_groups_file, bioisostere_file, target_compound, r_group_to_replace, output_csv):
+    """
+    Process R-group replacements and bioisostere substitutions, saving valid SMILES to a CSV file.
+    """
+    # Load the core molecule and R-groups data
+    df_r_groups = pd.read_csv(r_groups_file)
+    df_bioisostere = pd.read_csv(bioisostere_file)
+
+    # Extract the core molecule SMILES for the target compound
+    compound_data = df_r_groups[df_r_groups["Compound Name"] == target_compound]
+    if compound_data.empty:
+        print(f"Error: No data found for compound '{target_compound}'.")
+        return
+
+    core_row = compound_data[compound_data["R-group"] == "Core"]
+    if core_row.empty:
+        print(f"Error: No core scaffold found for compound '{target_compound}'.")
+        return
+
+    core_smiles = core_row["SMILES"].values[0]
+
+    # Store all original R-groups (excluding "Core")
+    r_groups = {}
+    for _, row in compound_data.iterrows():
+        group_type = row["R-group"]
+        smiles = row["SMILES"]
+        if group_type.startswith("R"):  # R1, R2, etc.
+            r_number = int(group_type[1:])  # Convert "R1" -> 1, "R2" -> 2, etc.
+            r_groups[r_number] = smiles
+
+    # Extract bioisostere candidates (i.e., the fragments to replace the specified R-group)
+    bioisostere_list = df_bioisostere["Candidate Fragments"].tolist()
+
+    if not bioisostere_list:
+        print(f"Error: No bioisostere candidates found in {bioisostere_file}.")
+        return
+
+    results = []
+    
+
+    # Iterate through each bioisostere candidate and perform replacements
+    for bioisostere in bioisostere_list:
+        #print(f"Processing bioisostere: {bioisostere}")  # Debug print
+
+        # Step 1: Replace the specified R-group with the bioisostere
+        core_with_bioisostere = core_smiles.replace(f"[[*]:{r_group_to_replace[1:]}]", bioisostere)
+        #print(core_with_bioisostere) # works
+
+        # Step 2: Replace remaining placeholders with their respective R-groups
+        updated_smiles = core_with_bioisostere
+        # print(updated_smiles) # works
+        for site, r_group_smiles in r_groups.items():
+            placeholder = f"[[*]:{site}]"
+            # Skip the placeholder for the R-group we're replacing
+            if f"[[*]:{r_group_to_replace[1:]}]" not in placeholder:
+                if placeholder in updated_smiles:  # Check if placeholder exists in updated_smiles
+                    #print(f"Replacing {placeholder} with {r_group_smiles}")  # Debug print
+                    updated_smiles = updated_smiles.replace(placeholder, r_group_smiles)
+                    #print(updated_smiles)
+        # Store results (no validation here)
+        results.append({
+            "Compound Name": target_compound,
+            "Replaced R-Group": r_group_to_replace,
+            "New SMILES": updated_smiles
+        })
+        
+    # Step 4: Save results to CSV
+    if results:
+        output_df = pd.DataFrame(results)
+        output_df.to_csv(output_csv, index=False)
+        print(f"Processed molecules saved to {output_csv}")
+    else:
+        print("No valid molecules to save.")
+
+# === Example Usage ===
+r_groups_file = "r_groups.csv"  # Core & R-groups input file
+bioisostere_file = "filtered_bioisosteres_asiatic-acid_r1.csv"  # Bioisostere file
+target_compound = "Asiatic Acid"  # Compound name
+compound_name = target_compound.replace(" ", "")
+r_group_to_replace = "R1"  # Specify which R-group to replace (e.g., "R1")
+output_csv = "final_replacements_"+compound_name+"_"+r_group_to_replace+"temp.csv"  # Output CSV file
+
+process_r_groups(r_groups_file, bioisostere_file, target_compound, r_group_to_replace, output_csv)
